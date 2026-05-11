@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>墨韵敦煌 · 飞天 — 动态海报</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1008;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: "Noto Serif SC", "SimSun", "KaiTi", serif;
+    }
+    #container {
+      position: relative;
+      border: 2px solid rgba(180,140,80,0.4);
+      box-shadow: 0 0 60px rgba(180,120,40,0.25),
+                  inset 0 0 60px rgba(0,0,0,0.5);
+    }
+    #caption {
+      position: absolute;
+      bottom: 18px;
+      width: 100%;
+      text-align: center;
+      color: rgba(210,175,120,0.75);
+      font-size: 13px;
+      letter-spacing: 2px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #caption .title { font-size: 18px; letter-spacing: 4px; display: block; margin-bottom: 4px; }
+    #caption .desc  { font-size: 12px; opacity: 0.7; }
+    #hint {
+      position: absolute;
+      top: 16px;
+      width: 100%;
+      text-align: center;
+      color: rgba(210,175,120,0.5);
+      font-size: 11px;
+      letter-spacing: 1px;
+      pointer-events: none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <div id="hint">⟡  移动鼠标 · 点击 · 拖拽  ⟡</div>
+  <div id="caption">
+    <span class="title">墨 韵 敦 煌 · 飞 天</span>
+    <span class="desc">以敦煌飞天为灵感，水墨晕染为底，矿物色点缀。<br>鼠标引导飞天飘带流转，点击绽放莲花，体验传统美学与数字艺术的交融。</span>
+  </div>
+</div>
+
+<script>
+/**
+ * ============================================================
+ *  墨韵敦煌 · 飞天  —  Ink Rhythm of Dunhuang · Flying Celestial
+ * ============================================================
+ *
+ * 【创作说明 / Creative Statement】
+ *   以敦煌飞天为灵感，水墨晕染为底，矿物色点缀。
+ *   鼠标引导飞天飘带流转，点击绽放莲花，
+ *   体验传统美学与数字艺术的交融。
+ *
+ * 【技术要素 / Technical Elements】
+ *   - setup / draw 结构
+ *   - HSB 色彩模式 (colorMode HSB)
+ *   - 基本图形: 矩形(边框回纹)、椭圆(莲花瓣/涟漪)、
+ *               线条(飞天飘带)、弧线(曼陀罗环)
+ *   - 变量驱动动画: time 控制全局律动, breathPhase 呼吸感缩放,
+ *                   mandalaRotation 旋转角度跟随鼠标
+ *   - 鼠标输入: 位置影响曼陀罗旋转与飘带偏移,
+ *               点击产生涟漪与墨花, 拖拽产生墨滴轨迹
+ *   - 坐标系变换: translate() 平移至画面中心,
+ *                 rotate() 旋转曼陀罗, scale() 呼吸缩放
+ *   - 传统文化主题: 敦煌莫高窟飞天、莲花曼陀罗、回纹边框、
+ *                   水墨晕染、朱砂/石青/佛金矿物颜料色系
+ */
+
+// ==================== 全局变量 ====================
+let time           = 0;       // 全局动画时间
+let breathPhase    = 0;       // "呼吸"相位 (0.85~1.0)
+let ribbonPhases   = [];      // 每条飘带的初始相位偏移
+let ribbonCount    = 5;       // 飘带数量
+let dunhuangColors = [];      // 敦煌矿物色系
+
+let mandalaRotation = 0;      // 曼陀罗当前旋转角度
+let targetRotation  = 0;      // 旋转目标值 (由鼠标 X 坐标映射)
+
+let isDragging      = false;  // 是否正在拖拽
+let dragStart;                // 拖拽起始点
+let dragInfluence   = 0;      // 拖拽影响力 (0~1)
+
+let ripples  = [];            // 涟漪列表
+let inkDrops = [];            // 墨滴粒子列表
+
+
+// ==================== 初始化 ====================
+function setup() {
+  // 获取容器尺寸
+  let container = document.getElementById('container');
+  let canvas = createCanvas(800, 800);
+  canvas.parent('container');
+
+  // ---- HSB 色彩模式 (H:0-360, S:0-100, B:0-100, A:0-1) ----
+  colorMode(HSB, 360, 100, 100, 1);
+
+  // ---- 初始化飘带相位 ----
+  ribbonPhases = [];
+  for (let i = 0; i < ribbonCount; i++) {
+    ribbonPhases[i] = random(TWO_PI);
+  }
+
+  // ---- 敦煌色系 ----
+  dunhuangColors = [
+    color(5,   85, 90),   // [0] 朱砂红
+    color(200, 80, 70),   // [1] 石青蓝
+    color(45,  90, 90),   // [2] 佛金色
+    color(30,  10, 25),   // [3] 墨色
+    color(35,  40, 80),   // [4] 沙土色
+    color(160, 50, 85),   // [5] 松石绿
+  ];
+
+  dragStart = createVector(0, 0);
+
+  // ---- 墨色初始背景 ----
+  background(30, 10, 25);
+}
+
+
+// ==================== 主循环 ====================
+function draw() {
+  // ---- 半透明背景覆盖 (水墨拖影效果) ----
+  noStroke();
+  fill(30, 10, 25, 0.12);
+  rect(0, 0, width, height);
+
+  // ---- 更新全局时间 ----
+  time += 0.016;
+
+  // ---- 更新呼吸相位 ----
+  breathPhase = sin(time * 0.5) * 0.15 + 0.85;
+
+  // ---- 鼠标 X → 目标旋转角度 ----
+  targetRotation = map(mouseX, 0, width, -PI / 6, PI / 6);
+  mandalaRotation += (targetRotation - mandalaRotation) * 0.05;
+
+  // ---- 拖拽影响力衰减 ----
+  if (!isDragging && dragInfluence > 0) {
+    dragInfluence *= 0.97;
+    if (dragInfluence < 0.005) dragInfluence = 0;
+  }
+
+  // ============ 第 1 层: 水墨晕染背景 ============
+  drawInkWashBackground();
+
+  // ============ 第 2 层: 飞天飘带 ============
+  drawFlyingRibbons();
+
+  // ============ 第 3 层: 中心莲花曼陀罗 (translate + rotate + scale) ============
+  push();
+  translate(width / 2, height / 2);
+  drawLotusMandala();
+  pop();
+
+  // ============ 第 4 层: 边框装饰 ============
+  drawBorderDecoration();
+
+  // ============ 第 5 层: 涟漪 ============
+  updateAndDrawRipples();
+
+  // ============ 第 6 层: 墨滴粒子 ============
+  updateAndDrawInkDrops();
+
+  // ============ 第 7 层: 鼠标光晕 ============
+  drawMouseGlow();
+}
+
+
+// ================================================================
+//  第 1 层: 水墨晕染背景
+// ================================================================
+function drawInkWashBackground() {
+  noStroke();
+  for (let i = 0; i < 3; i++) {
+    let offX = sin(time * 0.3 + i * TWO_PI / 3) * 60 * breathPhase;
+    let offY = cos(time * 0.4 + i * TWO_PI / 3) * 45 * breathPhase;
+    let alp  = map(sin(time * 0.6 + i), -1, 1, 0.02, 0.08);
+
+    fill(200 + i * 25, 12, 40 + i * 6, alp);
+    ellipse(width / 2 + offX, height / 2 + offY,
+            320 + sin(time + i) * 60, 380 + cos(time + i) * 50);
+  }
+
+  // 四角墨韵
+  fill(25, 5, 20, 0.05);
+  ellipse(100 + sin(time * 0.2) * 20, 100 + cos(time * 0.3) * 15, 180, 170);
+  ellipse(width - 100 + cos(time * 0.25) * 20,
+         height - 100 + sin(time * 0.35) * 15, 190, 175);
+}
+
+
+// ================================================================
+//  第 2 层: 飞天飘带 (curveVertex 闭合样条曲线)
+// ================================================================
+function drawFlyingRibbons() {
+  noFill();
+
+  for (let r = 0; r < ribbonCount; r++) {
+    let basePhase = ribbonPhases[r] + time * (0.7 + r * 0.12);
+
+    let mouseDist     = dist(mouseX, mouseY, width / 2, height / 2);
+    let mouseInfluence = constrain(mouseDist / (width * 0.45), 0, 1);
+    let activity      = 1 + dragInfluence * 2.5;
+
+    let baseColor = dunhuangColors[r % dunhuangColors.length];
+
+    // 预计算飘带顶点
+    let ptCount = 150;
+    let xs = new Array(ptCount);
+    let ys = new Array(ptCount);
+
+    for (let i = 0; i < ptCount; i++) {
+      let t = map(i, 0, ptCount, 0, TWO_PI);
+
+      let radius = 170 + r * 38;
+      radius += sin(t * 3 + basePhase) * 65 * activity;
+      radius += sin(t * 5 + basePhase * 1.4) * 28;
+      radius += cos(t * 7 + basePhase * 0.7) * 15 * mouseInfluence;
+
+      let pullX = (mouseX - width / 2) * 0.18 * sin(t + basePhase);
+      let pullY = (mouseY - height / 2) * 0.18 * cos(t + basePhase);
+
+      xs[i] = cos(t + basePhase * 0.25) * radius + pullX;
+      ys[i] = sin(t + basePhase * 0.25) * radius + pullY;
+    }
+
+    // 三层叠加
+    for (let layer = 0; layer < 3; layer++) {
+      let layerAlpha = map(layer, 0, 2, 0.55, 0.18);
+      let layerWidth = map(layer, 0, 2, 3.5, 0.8) * breathPhase * activity;
+
+      strokeWeight(layerWidth);
+      let ribbonHue = (hue(baseColor) + time * 15 + r * 40) % 360;
+      stroke(ribbonHue,
+             saturation(baseColor) * (0.7 + layer * 0.15),
+             brightness(baseColor) * (0.6 + layer * 0.2),
+             layerAlpha);
+
+      // curveVertex 绘制平滑闭合曲线
+      beginShape();
+      curveVertex(xs[ptCount - 2] + width / 2, ys[ptCount - 2] + height / 2);
+      for (let i = 0; i < ptCount; i++) {
+        curveVertex(xs[i] + width / 2, ys[i] + height / 2);
+      }
+      curveVertex(xs[0] + width / 2, ys[0] + height / 2);
+      curveVertex(xs[1] + width / 2, ys[1] + height / 2);
+      endShape();
+    }
+  }
+}
+
+
+// ================================================================
+//  第 3 层: 莲花曼陀罗 (translate + rotate + scale)
+// ================================================================
+function drawLotusMandala() {
+  // ★ scale: 呼吸缩放
+  let scl = breathPhase * (1 + dragInfluence * 0.25);
+  scale(scl);
+
+  // ★ rotate: 鼠标控制旋转
+  rotate(mandalaRotation);
+
+  let petalCount = 8;
+
+  // -------- 外层: 莲花瓣 (椭圆旋转阵列) --------
+  for (let i = 0; i < petalCount; i++) {
+    let angle = i * TWO_PI / petalCount;
+    push();
+    rotate(angle);
+    translate(0, -80);
+
+    // 花瓣颜色在朱砂红与佛金之间渐变
+    let petalHue = lerpColor(
+      dunhuangColors[0], dunhuangColors[2],
+      map(sin(time + i * 1.2), -1, 1, 0, 1)
+    );
+    let petalSat = 75 + sin(time * 1.5 + i) * 15;
+    let petalBri = 68 + cos(time * 2 + i) * 18;
+
+    for (let g = 0; g < 5; g++) {
+      let gAlpha = map(g, 0, 4, 0.75, 0.15);
+      fill(hue(petalHue), petalSat, petalBri + g * 4, gAlpha);
+      noStroke();
+      ellipse(0, 0, 26 - g * 3.5, 58 - g * 6);
+    }
+    pop();
+  }
+
+  // -------- 中层: 装饰圆环 (虚线弧) --------
+  noFill();
+  for (let ring = 0; ring < 3; ring++) {
+    let ringR   = 47 + ring * 18;
+    let ringHue = (hue(dunhuangColors[1]) + ring * 25 + time * 6) % 360;
+    strokeWeight(1.6 - ring * 0.35);
+    stroke(ringHue, 55, 82, 0.65 - ring * 0.18);
+
+    let dashLen = 0.14 + ring * 0.04;
+    let rotSpeed = time * 0.4 * (ring + 1);
+    for (let a = 0; a < TWO_PI; a += dashLen * 2) {
+      arc(0, 0, ringR * 2, ringR * 2,
+          a + rotSpeed, a + rotSpeed + dashLen);
+    }
+  }
+
+  // -------- 内层: 莲心 (金色小圆点旋转阵列) --------
+  let innerR = 18;
+  for (let i = 0; i < 12; i++) {
+    let a    = i * TWO_PI / 12 + time * 0.25;
+    let dotX = cos(a) * innerR;
+    let dotY = sin(a) * innerR;
+    fill(45, 85, 92, 0.78);
+    noStroke();
+    ellipse(dotX, dotY, 6.5, 6.5);
+  }
+
+  // -------- 中心光点 --------
+  fill(45, 80, 98);
+  noStroke();
+  ellipse(0, 0, 10 * breathPhase, 10 * breathPhase);
+}
+
+
+// ================================================================
+//  第 4 层: 边框装饰 (矩形 + 回纹)
+// ================================================================
+function drawBorderDecoration() {
+  noFill();
+  let borderAlpha = 0.28 + sin(time) * 0.10;
+
+  // 外边框 (石青色)
+  stroke(198, 55, 72, borderAlpha);
+  strokeWeight(2.2);
+  rect(18, 18, width - 36, height - 36);
+
+  // 内边框 (沙土色)
+  stroke(32, 28, 72, borderAlpha * 0.65);
+  strokeWeight(1);
+  rect(28, 28, width - 56, height - 56);
+
+  // 四角回纹装饰
+  let cornerAlpha = 0.22 + sin(time * 1.5) * 0.08;
+  for (let corner = 0; corner < 4; corner++) {
+    let cx   = (corner % 2 === 0) ? 32 : width - 32;
+    let cy   = (corner < 2) ? 32 : height - 32;
+    let dirX = (corner % 2 === 0) ? 1 : -1;
+    let dirY = (corner < 2) ? 1 : -1;
+
+    stroke(44, 65, 82, cornerAlpha);
+    strokeWeight(1.5);
+    for (let j = 0; j < 3; j++) {
+      let off = j * 11;
+      rect(cx + dirX * off, cy + dirY * off, 7, 7);
+    }
+  }
+}
+
+
+// ================================================================
+//  第 5 层: 涟漪 (鼠标点击产生)
+// ================================================================
+class Ripple {
+  constructor(px, py) {
+    this.x        = px;
+    this.y        = py;
+    this.radius   = 0;
+    this.maxRadius = 160;
+    this.alphaVal  = 0.55;
+    this.hueVal   = (hue(dunhuangColors[2]) + random(-20, 20)) % 360;
+  }
+
+  update() {
+    this.radius   += 2.8;
+    this.alphaVal -= 0.0075;
+  }
+
+  isDead() {
+    return this.alphaVal <= 0 || this.radius > this.maxRadius;
+  }
+
+  draw() {
+    noFill();
+    strokeWeight(2.2 - this.radius / this.maxRadius * 1.6);
+    stroke(this.hueVal, 45, 88, this.alphaVal);
+    ellipse(this.x, this.y, this.radius * 2, this.radius * 2);
+
+    if (this.radius > 15) {
+      strokeWeight(0.6);
+      stroke(this.hueVal, 28, 92, this.alphaVal * 0.45);
+      ellipse(this.x, this.y, this.radius * 1.45, this.radius * 1.45);
+    }
+  }
+}
+
+function updateAndDrawRipples() {
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    let r = ripples[i];
+    r.update();
+    r.draw();
+    if (r.isDead()) {
+      ripples.splice(i, 1);
+    }
+  }
+}
+
+
+// ================================================================
+//  第 6 层: 墨滴粒子
+// ================================================================
+class InkDrop {
+  constructor(px, py, pvx, pvy) {
+    this.x       = px;
+    this.y       = py;
+    this.vx      = pvx;
+    this.vy      = pvy;
+    this.size    = random(3, 14);
+    this.alphaVal = random(0.25, 0.65);
+    this.hueVal  = random(22, 38);
+  }
+
+  update() {
+    this.x  += this.vx;
+    this.y  += this.vy;
+    this.vy += 0.08;
+    this.alphaVal -= 0.0045;
+    this.size *= 1.003;
+  }
+
+  isDead() {
+    return this.alphaVal <= 0
+        || this.x < -20 || this.x > width + 20
+        || this.y < -20 || this.y > height + 20;
+  }
+
+  draw() {
+    noStroke();
+    fill(this.hueVal, 6, 32, this.alphaVal);
+    ellipse(this.x, this.y, this.size, this.size * 0.65);
+  }
+}
+
+function updateAndDrawInkDrops() {
+  for (let i = inkDrops.length - 1; i >= 0; i--) {
+    let d = inkDrops[i];
+    d.update();
+    d.draw();
+    if (d.isDead()) {
+      inkDrops.splice(i, 1);
+    }
+  }
+}
+
+
+// ================================================================
+//  第 7 层: 鼠标光标光晕
+// ================================================================
+function drawMouseGlow() {
+  let glowR = 14 + sin(time * 3) * 5;
+  let glowA = 0.20 + sin(time * 2.5) * 0.07;
+
+  noStroke();
+  for (let i = 3; i > 0; i--) {
+    let r = glowR + i * 7;
+    let a = glowA / (i + 0.8);
+    fill(44, 55, 92, a);
+    ellipse(mouseX, mouseY, r * 2, r * 2);
+  }
+  fill(44, 30, 98, glowA * 1.2);
+  ellipse(mouseX, mouseY, glowR * 0.7, glowR * 0.7);
+}
+
+
+// ================================================================
+//  鼠标事件处理
+// ================================================================
+function mousePressed() {
+  ripples.push(new Ripple(mouseX, mouseY));
+
+  for (let i = 0; i < 6; i++) {
+    let a = random(TWO_PI);
+    let s = random(0.6, 3.5);
+    inkDrops.push(new InkDrop(mouseX, mouseY, cos(a) * s, sin(a) * s));
+  }
+
+  dragStart.set(mouseX, mouseY);
+  isDragging = true;
+
+  // 阻止默认行为 (防止文本选中等)
+  return false;
+}
+
+function mouseDragged() {
+  if (!isDragging) return;
+
+  let spd   = dist(mouseX, mouseY, pmouseX, pmouseY);
+  let count = int(spd / 4) + 1;
+
+  for (let i = 0; i < count; i++) {
+    let t  = i / count;
+    let px = lerp(pmouseX, mouseX, t);
+    let py = lerp(pmouseY, mouseY, t);
+    inkDrops.push(new InkDrop(px, py, random(-0.4, 0.4), random(-0.4, 0.4)));
+  }
+
+  dragInfluence = constrain(dragInfluence + 0.018, 0, 1);
+  return false;
+}
+
+function mouseReleased() {
+  isDragging = false;
+
+  ripples.push(new Ripple(mouseX, mouseY));
+  for (let i = 0; i < 10; i++) {
+    let a = random(TWO_PI);
+    let s = random(1, 4.5);
+    inkDrops.push(new InkDrop(mouseX, mouseY, cos(a) * s, sin(a) * s));
+  }
+  return false;
+}
+
+// 触摸事件 (移动端兼容)
+function touchStarted() {
+  mousePressed();
+  return false;
+}
+
+function touchMoved() {
+  mouseDragged();
+  return false;
+}
+
+function touchEnded() {
+  mouseReleased();
+  return false;
+}
+</script>
+</body>
+</html>
